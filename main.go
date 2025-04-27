@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"syscall"
+	"golang.org/x/sys/unix"
 )
 
 func main() {
@@ -32,13 +33,13 @@ func run() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWUTS |
-			syscall.CLONE_NEWPID |
-			syscall.CLONE_NEWNS |
-			syscall.CLONE_NEWNET |
-			syscall.CLONE_NEWIPC |
-			syscall.CLONE_NEWUSER,
+	cmd.SysProcAttr = &unix.SysProcAttr{
+		Cloneflags: unix.CLONE_NEWUTS |
+			unix.CLONE_NEWPID |
+			unix.CLONE_NEWNS |
+			unix.CLONE_NEWNET |
+			unix.CLONE_NEWIPC |
+			unix.CLONE_NEWUSER,
 
 		// UID/GID mapping
 		UidMappings: []syscall.SysProcIDMap{
@@ -54,28 +55,33 @@ func run() {
 }
 
 func child() {
-	fmt.Printf("=> Inside container! PID: %d\n", os.Getpid())
+	fmt.Println("=> Inside container!")
+
+	// clear previous environment
+	os.Clearenv()
+
+	// set new environment
+	os.Setenv("PATH", "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	os.Setenv("USER", "root")
+	os.Setenv("HOME", "/root")
+	os.Setenv("SHELL", "/bin/sh")
+	os.Setenv("LANG", "C.UTF-8")
 
 	// Make mount namespace private so it doesn't affect host
-	must(syscall.Mount("", "/", "", syscall.MS_REC|syscall.MS_PRIVATE, ""))
+	must(unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""))
 
 	// Chroot to minimal filesystem
 	rootfs := "/tmp/rootfs"
-	must(syscall.Chroot(rootfs))
-	must(syscall.Chdir("/"))
+	must(unix.Chroot(rootfs))
+	must(unix.Chdir("/"))
 
 	// Set hostname (UTS namespace)
-	must(syscall.Sethostname([]byte("mini-container")))
+	// must(unix.Sethostname([]byte("mini-container")))
 
 	// Mount proc, sys, dev inside chroot
-	must(os.MkdirAll("/proc", 0755))
-	must(syscall.Mount("proc", "/proc", "proc", 0, ""))
-
-	must(os.MkdirAll("/sys", 0755))
-	must(syscall.Mount("sysfs", "/sys", "sysfs", 0, ""))
-
-	must(os.MkdirAll("/dev", 0755))
-	must(syscall.Mount("tmpfs", "/dev", "tmpfs", 0, ""))
+	must(unix.Mount("proc", "/proc", "proc", 0, ""))
+	must(unix.Mount("sysfs", "/sys", "sysfs", 0, ""))
+	must(unix.Mount("tmpfs", "/dev", "tmpfs", 0, ""))
 
 	// Run specified command inside container
 	cmd := exec.Command(os.Args[2], os.Args[3:]...)
@@ -84,6 +90,11 @@ func child() {
 	cmd.Stderr = os.Stderr
 
 	must(cmd.Run())
+
+	// Unmount FS
+	must(unix.Unmount("/dev", 0))
+	must(unix.Unmount("/sys", 0))
+	must(unix.Unmount("/proc", 0))
 }
 
 func must(err error) {
