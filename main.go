@@ -10,23 +10,32 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: mini-runtime run <command> [args...]")
+
+	if len(os.Args) < 3 {
+		usage()
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "run":
 		run()
+		os.Exit(1)
+
 	case "child":
 		child()
+		os.Exit(0)
+
 	default:
-		panic("Unknown command: " + os.Args[1])
+		usage()
+		fmt.Println("Unknown command: " + os.Args[1])
+		os.Exit(1)
 	}
 }
 
 func run() {
-	fmt.Println("=> Running:", os.Args[2:], "in a new namespace")
+
+	// setup environment for container
+	setupEnv()
 
 	cmd := exec.Command("/proc/self/exe", append([]string{"child"}, os.Args[2:]...)...)
 	cmd.Stdin = os.Stdin
@@ -35,11 +44,11 @@ func run() {
 
 	cmd.SysProcAttr = &unix.SysProcAttr{
 		Cloneflags: unix.CLONE_NEWUTS |
-			unix.CLONE_NEWPID |
-			unix.CLONE_NEWNS |
-			unix.CLONE_NEWNET |
-			unix.CLONE_NEWIPC |
-			unix.CLONE_NEWUSER,
+					unix.CLONE_NEWPID |
+					unix.CLONE_NEWNS  |
+					unix.CLONE_NEWNET |
+					unix.CLONE_NEWIPC |
+					unix.CLONE_NEWUSER,
 
 		// UID/GID mapping
 		UidMappings: []syscall.SysProcIDMap{
@@ -51,26 +60,23 @@ func run() {
 		GidMappingsEnableSetgroups: false,
 	}
 
-	must(cmd.Run())
+
+	// must(cmd.Run())
+	err := cmd.Start()
+	if err != nil {
+		os.Exit(1)
+	}
+
+	pid := cmd.Process.Pid
+	initializeNetworking(pid)
 }
 
 func child() {
-	fmt.Println("=> Inside container!")
-
-	// clear previous environment
-	os.Clearenv()
-
-	// set new environment
-	os.Setenv("PATH", "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-	os.Setenv("USER", "root")
-	os.Setenv("HOME", "/root")
-	os.Setenv("SHELL", "/bin/sh")
-	os.Setenv("LANG", "C.UTF-8")
 
 	// Make mount namespace private so it doesn't affect host
 	must(unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""))
 
-	// Chroot to minimal filesystem
+	// Chroot to filesystem
 	rootfs := "/tmp/rootfs"
 	must(unix.Chroot(rootfs))
 	must(unix.Chdir("/"))
@@ -83,15 +89,50 @@ func child() {
 	must(unix.Mount("sysfs", "/sys", "sysfs", 0, ""))
 	must(unix.Mount("tmpfs", "/dev", "tmpfs", 0, ""))
 
+	// Add slirp4netns network interface
+
 	// Run specified command inside container
 	cmd := exec.Command(os.Args[2], os.Args[3:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	must(cmd.Run())
+	err := cmd.Run()
 
-	// Unmount FS
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	// Unmount
+	unMount()
+}
+
+func usage() {
+	fmt.Println("Usage: minico run <command> [args...]")
+}
+
+func setupEnv() {
+	// clear old environment
+	os.Clearenv()
+
+	// set new environment
+	os.Setenv("PATH", "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	os.Setenv("USER", "root")
+	os.Setenv("HOME", "/root")
+	os.Setenv("SHELL", "/bin/sh")
+	os.Setenv("LANG", "C.UTF-8")
+}
+
+// add a network interface in the newly created user namespace
+func initializeNetworking(pid int) {
+	stringifiedPid := fmt.Sprintf("%d", pid)
+	netCmd := exec.Command("slirp4netns", "--configure", "--mtu", "65520", "--disable-host-loopback", stringifiedPid, "veth0")
+	if err := netCmd.Run(); err != nil {
+		fmt.Println("NetworkError:", err.Error())
+	}
+}
+
+func unMount() {
 	must(unix.Unmount("/dev", 0))
 	must(unix.Unmount("/sys", 0))
 	must(unix.Unmount("/proc", 0))
@@ -102,4 +143,5 @@ func must(err error) {
 		panic(err)
 	}
 }
+
 
