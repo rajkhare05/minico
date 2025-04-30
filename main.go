@@ -89,7 +89,7 @@ func child() {
 	must(unix.Mount("sysfs", "/sys", "sysfs", 0, ""))
 	must(unix.Mount("tmpfs", "/dev", "tmpfs", 0, ""))
 
-	// Add slirp4netns network interface
+	addDNSNameserver()
 
 	// Run specified command inside container
 	cmd := exec.Command(os.Args[2], os.Args[3:]...)
@@ -132,6 +132,30 @@ func initializeNetworking(pid int) {
 	}
 }
 
+// add DNS nameserver
+func addDNSNameserver() {
+	// check if the file exits
+	if _, err := os.Stat("/etc/resolv.conf"); err != nil {
+		// if not, then
+		if os.IsNotExist(err) {
+			// create a file
+			if _, err = os.Create("/etc/resolv.conf"); err != nil {
+				fmt.Println("Error while creating resolv.conf")
+				return
+
+			} /* else if os.Chmod("/etc/resolv.conf", 0644) != nil { // change permissions to rw-r--r--
+				fmt.Println("Error while changing permissions of resolv.conf")
+				return
+			} */
+		}
+	}
+
+	// if the file exits, then write
+	if os.WriteFile("/etc/resolv.conf", []byte("nameserver 10.0.2.3"), 0644) != nil {
+		fmt.Println("Error while writing resolv.conf")
+	}
+}
+
 func unMount() {
 	must(unix.Unmount("/dev", 0))
 	must(unix.Unmount("/sys", 0))
@@ -143,5 +167,4 @@ func must(err error) {
 		panic(err)
 	}
 }
-
 
