@@ -116,11 +116,10 @@ func setupEnv() {
 	os.Clearenv()
 
 	// set new environment
-	os.Setenv("PATH", "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	os.Setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	os.Setenv("USER", "root")
 	os.Setenv("HOME", "/root")
 	os.Setenv("SHELL", "/bin/sh")
-	os.Setenv("LANG", "C.UTF-8")
 }
 
 // add a network interface in the newly created user namespace
