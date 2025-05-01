@@ -81,8 +81,8 @@ func child() {
 	must(unix.Chroot(rootfs))
 	must(unix.Chdir("/"))
 
-	// Set hostname (UTS namespace)
-	// must(unix.Sethostname([]byte("mini-container")))
+	// Set hostname
+	must(unix.Sethostname([]byte("minico")))
 
 	// Mount proc, sys, dev inside chroot
 	must(unix.Mount("proc", "/proc", "proc", 0, ""))
